@@ -1,0 +1,4 @@
+node_modules/
+*.jsonl
+!src/base-session.jsonl
+.DS_Store

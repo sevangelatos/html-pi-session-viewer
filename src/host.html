@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pi Session Viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#16161e;color:#c8c8d0;font-family:ui-monospace,Menlo,Consolas,monospace}
+  #viewer{position:fixed;inset:0;width:100%;height:100%;border:0;display:none}
+  #drop{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center}
+  #drop .box{border:2px dashed #667;border-radius:12px;padding:56px 72px;transition:.15s}
+  #drop h1{font-size:18px;margin:0 0 8px;font-weight:600}
+  #drop p{margin:4px 0;font-size:13px;color:#8a8a98}
+  #drop button{margin-top:12px;background:#2a2a3a;color:inherit;border:1px solid #556;border-radius:6px;padding:6px 14px;font:inherit;cursor:pointer}
+  #err{color:#e88;font-size:13px;min-height:1em;max-width:520px}
+  body.over #drop .box{border-color:#8af;background:#1f1f2c}
+  #veil{position:fixed;inset:0;display:none;background:rgba(80,120,255,.18);border:3px dashed #8af;z-index:9;align-items:center;justify-content:center;font-size:20px;pointer-events:none}
+  body.over.loaded #veil{display:flex}
+</style>
+</head>
+<body>
+<div id="drop"><div class="box">
+  <h1>Pi session viewer</h1>
+  <p>Drop a session <code>.jsonl</code> file here</p>
+  <button id="pick">or choose a file…</button>
+  <input type="file" id="file" accept=".jsonl,.json,.txt" hidden>
+</div><div id="err"></div></div>
+<div id="veil">Drop to load another session</div>
+<iframe id="viewer"></iframe>
+<script id="app-b64" type="text/plain">__APP_B64__</script>
+<script>
+(function(){
+  const b64=document.getElementById('app-b64').textContent.trim();
+  const APP=new TextDecoder().decode(Uint8Array.from(atob(b64),c=>c.charCodeAt(0)));
+  const viewer=document.getElementById('viewer'), err=document.getElementById('err');
+
+  function parse(text){
+    const entries=[]; let header=null;
+    text.split(/\r?\n/).forEach((line,i)=>{
+      line=line.trim(); if(!line) return;
+      let o; try{o=JSON.parse(line)}catch(e){ if(i===0) throw new Error('Not a JSONL file'); return; }
+      if(o.type==='session'||o.type==='header'){ if(!header) header={...o,type:'session'}; }
+      else entries.push(o);
+    });
+    if(!header&&!entries.length) throw new Error('No session data found');
+    // legacy (v1) files: add ids/parentIds
+    if(!header||!(header.version>=2)){
+      let prev=null;
+      entries.forEach((e,i)=>{ if(!e.id) e.id=String(i).padStart(8,'0'); if(e.parentId===undefined) e.parentId=prev; prev=e.id; });
+    }
+    if(!header) header={type:'session',id:'unknown',timestamp:entries[0]?.timestamp||'',cwd:''};
+    const leafId=entries.length?entries[entries.length-1].id:null;
+    return {header,entries,leafId};
+  }
+  function b64utf8(s){
+    const bytes=new TextEncoder().encode(s); let bin=''; const n=0x8000;
+    for(let i=0;i<bytes.length;i+=n) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+n));
+    return btoa(bin);
+  }
+  async function load(file){
+    try{
+      const data=parse(await file.text());
+      viewer.srcdoc=APP.replace('__SESSION_DATA__',()=>b64utf8(JSON.stringify(data)));
+      viewer.style.display='block';
+      document.getElementById('drop').style.display='none';
+      document.body.classList.add('loaded');
+      document.title='Pi Session: '+(data.header.id||file.name);
+      err.textContent='';
+    }catch(e){ err.textContent='Could not load '+file.name+': '+e.message; }
+  }
+  let depth=0;
+  addEventListener('dragenter',e=>{e.preventDefault();depth++;document.body.classList.add('over')});
+  addEventListener('dragleave',e=>{if(--depth<=0){depth=0;document.body.classList.remove('over')}});
+  addEventListener('dragover',e=>e.preventDefault());
+  addEventListener('drop',e=>{e.preventDefault();depth=0;document.body.classList.remove('over');const f=e.dataTransfer.files[0];if(f)load(f)});
+  addEventListener('message',e=>{if(e.data&&e.data.piFile)load(e.data.piFile)});
+  const inp=document.getElementById('file');
+  document.getElementById('pick').onclick=()=>inp.click();
+  inp.onchange=()=>inp.files[0]&&load(inp.files[0]);
+  // iframe drags: show veil when dragging over the page
+})();
+</script>
+</body>
+</html>
